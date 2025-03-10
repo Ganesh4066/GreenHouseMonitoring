@@ -9,31 +9,51 @@ from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 app = Flask(__name__)
 
-# Try to load pre-saved scaler and label encoder
-try:
-    with open("scaler.pkl", "rb") as f:
+# -------------------------------------------------
+# Define file paths for preprocessing objects and dataset
+# -------------------------------------------------
+scaler_path = "scaler.pkl"
+label_encoder_path = "label_encoder.pkl"
+data_path = "Modified_Crop_Data_Cleaned.csv"  # CSV file must be included in your repo
+
+# Define the features and target based on your dataset
+features = ["temperature", "ph", "humidity", "soil_moisture", "sunlight_exposure", "soil_type"]
+target = "label"
+
+# -------------------------------------------------
+# Load or Fit Preprocessing Objects
+# -------------------------------------------------
+if os.path.exists(scaler_path) and os.path.exists(label_encoder_path):
+    with open(scaler_path, "rb") as f:
         scaler = pickle.load(f)
-    with open("label_encoder.pkl", "rb") as f:
+    with open(label_encoder_path, "rb") as f:
         le = pickle.load(f)
-except FileNotFoundError:
-    # If not found, exit or handle appropriately
-    print("Pre-saved scaler and label encoder not found.")
-    exit(1)
-
-label_mapping = {i: label for i, label in enumerate(le.classes_)}
-
-# If you still need to load the dataset for any reason, check if it exists:
-data_path = "Modified_Crop_Data_Cleaned.csv"
-if os.path.exists(data_path):
+    print("Loaded pre-saved scaler and label encoder.")
+else:
+    print("Pre-saved scaler and label encoder not found. Fitting from dataset.")
+    # Load the dataset and fit the scaler and label encoder
     df = pd.read_csv(data_path, encoding="latin1")
     df.fillna(0, inplace=True)
-    features = ["temperature", "ph", "humidity", "soil_moisture", "sunlight_exposure", "soil_type"]
-    target = "label"
-    # You might use this to update ideal conditions, etc.
-else:
-    print("Dataset file not found; skipping dataset-based preprocessing.")
+    df_train = df[features + [target]].copy()
+    df_train[target] = df_train[target].astype(str)
+    le = LabelEncoder()
+    df_train[target] = le.fit_transform(df_train[target])
+    scaler = StandardScaler()
+    X_train = df_train[features].astype(np.float32)
+    scaler.fit(X_train)
+    # Save the fitted objects for future use
+    with open(scaler_path, "wb") as f:
+        pickle.dump(scaler, f)
+    with open(label_encoder_path, "wb") as f:
+        pickle.dump(le, f)
+    print("Fitted and saved scaler and label encoder.")
 
-# Load TFLite model
+# Build a label mapping from integer to crop name
+label_mapping = {i: label for i, label in enumerate(le.classes_)}
+
+# -------------------------------------------------
+# Load TFLite Model Using Absolute Path
+# -------------------------------------------------
 current_dir = os.path.dirname(os.path.abspath(__file__))
 tflite_model_path = os.path.join(current_dir, "greenhouse_model.tflite")
 interpreter = tflite.Interpreter(model_path=tflite_model_path)
@@ -41,15 +61,35 @@ interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
-# Firebase URL (unchanged)
+# -------------------------------------------------
+# Firebase URL for Sensor Data
+# -------------------------------------------------
+# Our model expects the following features (order matters):
+# - temperature, ph, humidity, soil_moisture, sunlight_exposure
+# Firebase SensorData provides keys:
+#   "temperature", "pH", "humidity", "soilMoisture", "lux", etc.
+# We map:
+#   Firebase "temperature"  -> temperature
+#   Firebase "pH"           -> ph
+#   Firebase "humidity"     -> humidity
+#   Firebase "soilMoisture" -> soil_moisture
+#   Firebase "lux"          -> sunlight_exposure
 FIREBASE_SENSOR_URL = "https://green-house-monitoring-2a06d-default-rtdb.firebaseio.com/Greenhouse/SensorData.json"
 
+# -------------------------------------------------
+# Flask Endpoints
+# -------------------------------------------------
 @app.route("/")
 def home():
     return "Crop Prediction API using Firebase data is running."
 
 @app.route("/predict", methods=["POST"])
 def predict():
+    """
+    Fetches sensor data from Firebase, maps and scales it,
+    runs inference with the TFLite model, and returns a JSON response.
+    """
+    # Fetch sensor data from Firebase
     response = requests.get(FIREBASE_SENSOR_URL)
     if response.status_code != 200:
         return jsonify({"error": "Failed to fetch sensor data from Firebase"}), 500
@@ -74,14 +114,18 @@ def predict():
         "sunlight_exposure": sunlight_exposure
     }
 
+    # Create input array in the expected order for the model
     input_array = np.array([[
         temperature, ph, humidity, soil_moisture, sunlight_exposure
     ]], dtype=np.float32)
+    # Scale the input using the fitted scaler
     input_scaled = scaler.transform(input_array)
 
+    # Run TFLite inference
     interpreter.set_tensor(input_details[0]['index'], input_scaled)
     interpreter.invoke()
     output_data = interpreter.get_tensor(output_details[0]['index'])
+
     predicted_class = int(np.argmax(output_data[0]))
     predicted_label = label_mapping.get(predicted_class, "Unknown")
 
