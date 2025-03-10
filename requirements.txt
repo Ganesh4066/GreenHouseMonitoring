@@ -1,0 +1,7 @@
+flask
+numpy==1.23.5
+pandas
+tflite-runtime
+requests
+scikit-learn
+shap
