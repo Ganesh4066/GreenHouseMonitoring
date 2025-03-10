@@ -12,12 +12,11 @@ app = Flask(__name__)
 # -------------------------------------------------
 # 1. Load the Training Dataset and Fit Preprocessing Objects
 # -------------------------------------------------
-# Path to your dataset file (include this file in your repository if needed)
-data_path = "Modified_Crop_Data_Cleaned.csv"
+data_path = "Modified_Crop_Data_Cleaned.csv"  # Make sure this file is in your repo
 df = pd.read_csv(data_path, encoding="latin1")
 df.fillna(0, inplace=True)
 
-# Our dataset columns: "temperature", "ph", "humidity", "soil_moisture", "label", "sunlight_exposure", "soil_type"
+# Dataset columns: "temperature", "ph", "humidity", "soil_moisture", "label", "sunlight_exposure", "soil_type"
 features = ["temperature", "ph", "humidity", "soil_moisture", "sunlight_exposure", "soil_type"]
 target = "label"
 
@@ -47,9 +46,9 @@ output_details = interpreter.get_output_details()
 # -------------------------------------------------
 # 3. Define Expected Mapping from Firebase Data
 # -------------------------------------------------
-# Our model expects these features in order:
+# Our model expects these features (order matters):
 # ["temperature", "ph", "humidity", "soil_moisture", "sunlight_exposure"]
-# Firebase SensorData provides keys:
+# Firebase SensorData provides:
 #   "temperature" -> temperature
 #   "pH"          -> ph
 #   "humidity"    -> humidity
@@ -63,7 +62,7 @@ model_features = ["temperature", "ph", "humidity", "soil_moisture", "sunlight_ex
 FIREBASE_SENSOR_URL = "https://green-house-monitoring-2a06d-default-rtdb.firebaseio.com/Greenhouse/SensorData.json"
 
 # -------------------------------------------------
-# 5. Flask Endpoints
+# 5. Define Flask Endpoints
 # -------------------------------------------------
 @app.route("/")
 def home():
@@ -72,15 +71,9 @@ def home():
 @app.route("/predict", methods=["POST"])
 def predict():
     """
-    Fetches sensor data from Firebase, maps and scales it,
-    runs TFLite inference, and returns a JSON response that includes:
-      - raw sensor data from Firebase,
-      - mapped features,
-      - raw model output,
-      - predicted crop (both index and label), and
-      - an explanatory message summarizing the conditions.
+    Fetch sensor data from Firebase, map & scale it,
+    run inference with the TFLite model, and return a JSON response.
     """
-    # Fetch sensor data from Firebase
     response = requests.get(FIREBASE_SENSOR_URL)
     if response.status_code != 200:
         return jsonify({"error": "Failed to fetch sensor data from Firebase"}), 500
@@ -105,15 +98,15 @@ def predict():
         "sunlight_exposure": sunlight_exposure
     }
 
-    # Create input array in the correct order
+    # Build the input array in the correct order
     input_array = np.array([[
         temperature, ph, humidity, soil_moisture, sunlight_exposure
     ]], dtype=np.float32)
-
-    # Scale the input using the fitted scaler
+    
+    # Scale input
     input_scaled = scaler.transform(input_array)
 
-    # Run TFLite inference
+    # Run inference with the TFLite model
     interpreter.set_tensor(input_details[0]['index'], input_scaled)
     interpreter.invoke()
     output_data = interpreter.get_tensor(output_details[0]['index'])
@@ -121,7 +114,6 @@ def predict():
     predicted_class = int(np.argmax(output_data[0]))
     predicted_label = label_mapping.get(predicted_class, "Unknown")
 
-    # Build an explanatory message
     message = (
         f"Predicted crop: '{predicted_label}'. Conditions: Temperature = {temperature}°C, "
         f"pH = {ph}, Humidity = {humidity}%, Soil Moisture = {soil_moisture}, "
@@ -139,5 +131,4 @@ def predict():
     return jsonify(response_json), 200
 
 if __name__ == "__main__":
-    # Railway (or similar platforms) will use the provided port
     app.run(debug=False, port=5000)
