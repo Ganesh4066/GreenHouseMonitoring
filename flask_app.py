@@ -64,16 +64,6 @@ output_details = interpreter.get_output_details()
 # -------------------------------------------------
 # Firebase URL for Sensor Data
 # -------------------------------------------------
-# Our model expects the following features (order matters):
-# - temperature, ph, humidity, soil_moisture, sunlight_exposure
-# Firebase SensorData provides keys:
-#   "temperature", "pH", "humidity", "soilMoisture", "lux", etc.
-# We map:
-#   Firebase "temperature"  -> temperature
-#   Firebase "pH"           -> ph
-#   Firebase "humidity"     -> humidity
-#   Firebase "soilMoisture" -> soil_moisture
-#   Firebase "lux"          -> sunlight_exposure
 FIREBASE_SENSOR_URL = "https://green-house-monitoring-2a06d-default-rtdb.firebaseio.com/Greenhouse/SensorData.json"
 
 # -------------------------------------------------
@@ -115,9 +105,7 @@ def predict():
     }
 
     # Create input array in the expected order for the model
-    input_array = np.array([[
-        temperature, ph, humidity, soil_moisture, sunlight_exposure
-    ]], dtype=np.float32)
+    input_array = np.array([[temperature, ph, humidity, soil_moisture, sunlight_exposure]], dtype=np.float32)
     # Scale the input using the fitted scaler
     input_scaled = scaler.transform(input_array)
 
@@ -146,4 +134,6 @@ def predict():
     return jsonify(response_json), 200
 
 if __name__ == "__main__":
-    app.run(debug=False, port=5000)
+    # Use the port provided by the environment or default to 5000
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
