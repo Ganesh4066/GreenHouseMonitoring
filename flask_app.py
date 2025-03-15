@@ -21,7 +21,7 @@ scaler_path = "scaler.pkl"
 label_encoder_path = "label_encoder.pkl"
 data_path = "Modified_Crop_Data_Cleaned.csv"  # This CSV must be included in your deployment
 
-# Define the features and target based on your dataset
+# Define the features and target based on your dataset.
 # We use 6 features: temperature, pH, humidity, soil_moisture, sunlight_exposure, and soil_type.
 features = ["temperature", "ph", "humidity", "soil_moisture", "sunlight_exposure", "soil_type"]
 target = "label"
@@ -83,7 +83,7 @@ FIREBASE_SENSOR_URL = "https://green-house-monitoring-2a06d-default-rtdb.firebas
 # Helper function: Get sensor values either from POST JSON or Firebase fallback
 # -------------------------------------------------
 def get_sensor_values():
-    # Force JSON parsing even if Content-Type is not set correctly.
+    # Force JSON parsing even if Content-Type is not correctly set.
     data = request.get_json(force=True, silent=True)
     if data and all(key in data for key in ["temperature", "pH", "humidity", "soilMoisture", "lux"]):
         try:
@@ -92,11 +92,10 @@ def get_sensor_values():
             humidity = float(data.get("humidity", 50.0))
             soil_moisture = float(data.get("soilMoisture", 0))
             sunlight_exposure = float(data.get("lux", 100))
-            # Use provided soil_type if available; otherwise default to 0.0.
             soil_type = float(data.get("soil_type", 0.0))
-            logging.debug("Sensor data received from POST request.")
+            logging.debug("Sensor data received from request.")
         except ValueError as e:
-            raise Exception(f"Invalid sensor value in POST data: {e}")
+            raise Exception(f"Invalid sensor value in request data: {e}")
     else:
         logging.debug("No valid sensor data in request; fetching from Firebase.")
         try:
@@ -160,8 +159,8 @@ def run_inference(sensor_values):
 def home():
     return "Crop Prediction API using Firebase data is running."
 
-# POST endpoint for inference (recommended when sending sensor data)
-@app.route("/predict", methods=["POST"])
+# /predict now supports both GET and POST.
+@app.route("/predict", methods=["GET", "POST"])
 def predict():
     try:
         sensor_values = get_sensor_values()
@@ -169,7 +168,7 @@ def predict():
     except Exception as e:
         logging.error(e)
         return jsonify({"error": str(e)}), 500
-    
+
     message = (
         f"Predicted crop: '{predicted_label}'. Conditions: Temperature = {sensor_values['temperature']}°C, "
         f"pH = {sensor_values['ph']}, Humidity = {sensor_values['humidity']}%, "
@@ -186,33 +185,7 @@ def predict():
     }
     return jsonify(response_json), 200
 
-# GET endpoint for inference for testing purposes.
-@app.route("/predict_get", methods=["GET"])
-def predict_get():
-    try:
-        sensor_values = get_sensor_values()  # This will use the Firebase fallback or defaults.
-        output_data, predicted_class, predicted_label = run_inference(sensor_values)
-    except Exception as e:
-        logging.error(e)
-        return jsonify({"error": str(e)}), 500
-    
-    message = (
-        f"Predicted crop: '{predicted_label}'. Conditions: Temperature = {sensor_values['temperature']}°C, "
-        f"pH = {sensor_values['ph']}, Humidity = {sensor_values['humidity']}%, "
-        f"Soil Moisture = {sensor_values['soil_moisture']}, "
-        f"Sunlight Exposure = {sensor_values['sunlight_exposure']} lux."
-    )
-    
-    response_json = {
-        "sensor_data": sensor_values,
-        "predicted_class": predicted_class,
-        "predicted_crop": predicted_label,
-        "raw_model_output": output_data.tolist(),
-        "message": message
-    }
-    return jsonify(response_json), 200
-
-# Dashboard endpoint remains GET-only
+# Dashboard endpoint remains GET-only.
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     try:
@@ -221,7 +194,7 @@ def dashboard():
     except Exception as e:
         logging.error(e)
         return f"Error: {e}", 500
-    
+
     html = """
     <!doctype html>
     <html>
