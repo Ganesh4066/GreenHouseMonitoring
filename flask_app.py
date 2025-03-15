@@ -74,15 +74,27 @@ except Exception as e:
     raise
 
 # -------------------------------------------------
-# Firebase URL for Sensor Data (fallback if no data in request)
+# Firebase URL for Sensor Data (fallback)
 # -------------------------------------------------
 FIREBASE_SENSOR_URL = "https://green-house-monitoring-2a06d-default-rtdb.firebaseio.com/Greenhouse/SensorData.json"
 
 # -------------------------------------------------
-# Helper: Get sensor values (from request JSON or Firebase)
+# Explanation dictionary for crops (expand as needed)
+# -------------------------------------------------
+explanations = {
+    "mothbeans": (
+        "The model predicted 'mothbeans' because the sensor readings—such as high temperature, "
+        "moderate humidity, and low soil moisture—closely match the conditions observed in the training "
+        "data for mothbeans. Note: The pH value appears unusually high, so please verify sensor calibration."
+    )
+    # Add more explanations for other crops here.
+}
+
+# -------------------------------------------------
+# Helper: Get sensor values (from request JSON or Firebase fallback)
 # -------------------------------------------------
 def get_sensor_values():
-    # Force JSON parsing even if Content-Type isn’t set properly
+    # Force JSON parsing even if Content-Type isn't set properly.
     data = request.get_json(force=True, silent=True)
     if data and all(key in data for key in ["temperature", "pH", "humidity", "soilMoisture", "lux"]):
         try:
@@ -158,7 +170,6 @@ def run_inference(sensor_values):
 def home():
     return "Crop Prediction API using Firebase data is running."
 
-# /predict endpoint supports GET and POST requests.
 @app.route("/predict", methods=["GET", "POST"])
 def predict():
     try:
@@ -167,6 +178,9 @@ def predict():
     except Exception as e:
         logging.error(e)
         return jsonify({"error": str(e)}), 500
+
+    # Get explanation if available
+    explanation = explanations.get(predicted_label, "No detailed explanation available for this crop.")
 
     message = (
         f"Predicted crop: '{predicted_label}'. Conditions: Temperature = {sensor_values['temperature']}°C, "
@@ -180,11 +194,12 @@ def predict():
         "predicted_class": predicted_class,
         "predicted_crop": predicted_label,
         "raw_model_output": output_data.tolist(),
-        "message": message
+        "message": message,
+        "explanation": explanation
     }
     return jsonify(response_json), 200
 
-# /dashboard endpoint renders an improved UI using Bootstrap.
+# Dashboard endpoint with improved UI using Bootstrap.
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     try:
@@ -193,6 +208,8 @@ def dashboard():
     except Exception as e:
         logging.error(e)
         return f"Error: {e}", 500
+
+    explanation = explanations.get(predicted_label, "No detailed explanation available for this crop.")
 
     message = (
         f"Predicted crop: '{predicted_label}'. Conditions: Temperature = {sensor_values['temperature']}°C, "
@@ -238,6 +255,7 @@ def dashboard():
                         <li class="list-group-item">Predicted Crop: <strong>{{ predicted_label }}</strong></li>
                         <li class="list-group-item">Predicted Class: {{ predicted_class }}</li>
                         <li class="list-group-item">Raw Output: <pre>{{ output_data }}</pre></li>
+                        <li class="list-group-item">Explanation: {{ explanation }}</li>
                      </ul>
                   </div>
                </div>
@@ -262,7 +280,8 @@ def dashboard():
         output_data=output_data.tolist(),
         predicted_class=predicted_class,
         predicted_label=predicted_label,
-        message=message
+        message=message,
+        explanation=explanation
     )
 
 if __name__ == "__main__":
