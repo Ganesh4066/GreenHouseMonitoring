@@ -17,6 +17,7 @@ label_encoder_path = "label_encoder.pkl"
 data_path = "Modified_Crop_Data_Cleaned.csv"  # CSV file must be included in your repo
 
 # Define the features and target based on your dataset
+# Note: If your TFLite model was trained on only 5 features, consider removing "soil_type"
 features = ["temperature", "ph", "humidity", "soil_moisture", "sunlight_exposure", "soil_type"]
 target = "label"
 
@@ -73,14 +74,18 @@ FIREBASE_SENSOR_URL = "https://green-house-monitoring-2a06d-default-rtdb.firebas
 def home():
     return "Crop Prediction API using Firebase data is running."
 
-@app.route("/predict", methods=["POST"])
+@app.route("/predict", methods=["GET", "POST"])
 def predict():
     """
     Fetches sensor data from Firebase, maps and scales it,
     runs inference with the TFLite model, and returns a JSON response.
     """
     # Fetch sensor data from Firebase
-    response = requests.get(FIREBASE_SENSOR_URL)
+    try:
+        response = requests.get(FIREBASE_SENSOR_URL)
+    except Exception as e:
+        return jsonify({"error": f"Error fetching sensor data: {e}"}), 500
+
     if response.status_code != 200:
         return jsonify({"error": "Failed to fetch sensor data from Firebase"}), 500
     sensor_data = response.json()
@@ -140,8 +145,11 @@ def dashboard():
     - Sensor values
     - Raw model output and predicted crop
     """
-    # Fetch sensor data from Firebase
-    response = requests.get(FIREBASE_SENSOR_URL)
+    try:
+        response = requests.get(FIREBASE_SENSOR_URL)
+    except Exception as e:
+        return f"Error fetching sensor data: {e}", 500
+
     if response.status_code != 200:
         return "Error fetching sensor data from Firebase", 500
     sensor_data = response.json()
