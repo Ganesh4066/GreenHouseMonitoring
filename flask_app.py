@@ -11,7 +11,7 @@ import logging
 app = Flask(__name__)
 app.config['DEBUG'] = True
 
-# Set up logging to output debug info
+# Set up logging
 logging.basicConfig(level=logging.DEBUG)
 
 # -------------------------------------------------
@@ -19,9 +19,10 @@ logging.basicConfig(level=logging.DEBUG)
 # -------------------------------------------------
 scaler_path = "scaler.pkl"
 label_encoder_path = "label_encoder.pkl"
-data_path = "Modified_Crop_Data_Cleaned.csv"  # Ensure this file is in your container
+data_path = "Modified_Crop_Data_Cleaned.csv"  # This CSV must be included in your deployment
 
 # Define the features and target based on your dataset
+# Note: If your TFLite model was trained on only 5 features, remove "soil_type" from the list.
 features = ["temperature", "ph", "humidity", "soil_moisture", "sunlight_exposure", "soil_type"]
 target = "label"
 
@@ -74,46 +75,67 @@ except Exception as e:
     raise
 
 # -------------------------------------------------
-# Firebase URL for Sensor Data
+# Firebase URL for Sensor Data (used as fallback if POST data is not provided)
 # -------------------------------------------------
 FIREBASE_SENSOR_URL = "https://green-house-monitoring-2a06d-default-rtdb.firebaseio.com/Greenhouse/SensorData.json"
 
 # -------------------------------------------------
-# Helper function: Fetch sensor data and run inference
+# Helper function: Get sensor values either from POST JSON or Firebase
 # -------------------------------------------------
-def get_sensor_and_inference():
-    try:
-        response = requests.get(FIREBASE_SENSOR_URL)
-    except Exception as e:
-        raise Exception(f"Error fetching sensor data: {e}")
+def get_sensor_values():
+    # Check if sensor values are provided in the request body (from MIT App Inventor)
+    data = request.get_json()
+    if data and all(key in data for key in ["temperature", "pH", "humidity", "soilMoisture", "lux"]):
+        try:
+            temperature = float(data.get("temperature", 25.0))
+            ph = float(data.get("pH", 7.0))
+            humidity = float(data.get("humidity", 50.0))
+            soil_moisture = float(data.get("soilMoisture", 0))
+            sunlight_exposure = float(data.get("lux", 100))
+            logging.debug("Sensor data received from POST request.")
+        except ValueError as e:
+            raise Exception(f"Invalid sensor value in POST data: {e}")
+    else:
+        # Fallback to Firebase sensor data if not provided in request
+        logging.debug("No sensor data in POST request; fetching from Firebase.")
+        try:
+            response = requests.get(FIREBASE_SENSOR_URL)
+        except Exception as e:
+            raise Exception(f"Error fetching sensor data from Firebase: {e}")
+        if response.status_code != 200:
+            raise Exception("Failed to fetch sensor data from Firebase")
+        sensor_data = response.json()
+        if not sensor_data:
+            raise Exception("No sensor data found in Firebase")
+        try:
+            temperature = float(sensor_data.get("temperature", 25.0))
+            ph = float(sensor_data.get("pH", 7.0))
+            humidity = float(sensor_data.get("humidity", 50.0))
+            soil_moisture = float(sensor_data.get("soilMoisture", 0))
+            sunlight_exposure = float(sensor_data.get("lux", 100))
+        except ValueError as e:
+            raise Exception(f"Invalid sensor value from Firebase: {e}")
     
-    if response.status_code != 200:
-        raise Exception("Failed to fetch sensor data from Firebase")
-    
-    sensor_data = response.json()
-    if not sensor_data:
-        raise Exception("No sensor data found in Firebase")
-    
-    try:
-        temperature = float(sensor_data.get("temperature", 25.0))
-        ph = float(sensor_data.get("pH", 7.0))
-        humidity = float(sensor_data.get("humidity", 50.0))
-        soil_moisture = float(sensor_data.get("soilMoisture", 0))
-        sunlight_exposure = float(sensor_data.get("lux", 100))
-    except ValueError as e:
-        raise Exception(f"Invalid sensor value: {e}")
-    
-    mapped_features = {
+    return {
         "temperature": temperature,
         "ph": ph,
         "humidity": humidity,
         "soil_moisture": soil_moisture,
         "sunlight_exposure": sunlight_exposure
     }
-    
-    input_array = np.array([[temperature, ph, humidity, soil_moisture, sunlight_exposure]], dtype=np.float32)
+
+# -------------------------------------------------
+# Helper function: Run TFLite inference given sensor values
+# -------------------------------------------------
+def run_inference(sensor_values):
+    input_array = np.array([[
+        sensor_values["temperature"],
+        sensor_values["ph"],
+        sensor_values["humidity"],
+        sensor_values["soil_moisture"],
+        sensor_values["sunlight_exposure"]
+    ]], dtype=np.float32)
     input_scaled = scaler.transform(input_array)
-    
     try:
         interpreter.set_tensor(input_details[0]['index'], input_scaled)
         interpreter.invoke()
@@ -123,8 +145,7 @@ def get_sensor_and_inference():
     
     predicted_class = int(np.argmax(output_data[0]))
     predicted_label = label_mapping.get(predicted_class, "Unknown")
-    
-    return sensor_data, mapped_features, output_data, predicted_class, predicted_label
+    return output_data, predicted_class, predicted_label
 
 # -------------------------------------------------
 # Flask Endpoints
@@ -133,24 +154,24 @@ def get_sensor_and_inference():
 def home():
     return "Crop Prediction API using Firebase data is running."
 
-@app.route("/predict", methods=["GET", "POST"])
+@app.route("/predict", methods=["POST"])
 def predict():
     try:
-        sensor_data, mapped_features, output_data, predicted_class, predicted_label = get_sensor_and_inference()
+        sensor_values = get_sensor_values()
+        output_data, predicted_class, predicted_label = run_inference(sensor_values)
     except Exception as e:
         logging.error(e)
         return jsonify({"error": str(e)}), 500
     
     message = (
-        f"Predicted crop: '{predicted_label}'. Conditions: Temperature = {mapped_features['temperature']}°C, "
-        f"pH = {mapped_features['ph']}, Humidity = {mapped_features['humidity']}%, "
-        f"Soil Moisture = {mapped_features['soil_moisture']}, "
-        f"Sunlight Exposure = {mapped_features['sunlight_exposure']} lux."
+        f"Predicted crop: '{predicted_label}'. Conditions: Temperature = {sensor_values['temperature']}°C, "
+        f"pH = {sensor_values['ph']}, Humidity = {sensor_values['humidity']}%, "
+        f"Soil Moisture = {sensor_values['soil_moisture']}, "
+        f"Sunlight Exposure = {sensor_values['sunlight_exposure']} lux."
     )
     
     response_json = {
-        "sensor_data": sensor_data,
-        "mapped_features": mapped_features,
+        "sensor_data": sensor_values,
         "predicted_class": predicted_class,
         "predicted_crop": predicted_label,
         "raw_model_output": output_data.tolist(),
@@ -161,7 +182,8 @@ def predict():
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     try:
-        sensor_data, mapped_features, output_data, predicted_class, predicted_label = get_sensor_and_inference()
+        sensor_values = get_sensor_values()
+        output_data, predicted_class, predicted_label = run_inference(sensor_values)
     except Exception as e:
         logging.error(e)
         return f"Error: {e}", 500
@@ -191,15 +213,17 @@ def dashboard():
       </body>
     </html>
     """
-    return render_template_string(html,
-                                  temperature=mapped_features['temperature'],
-                                  ph=mapped_features['ph'],
-                                  humidity=mapped_features['humidity'],
-                                  soil_moisture=mapped_features['soil_moisture'],
-                                  sunlight_exposure=mapped_features['sunlight_exposure'],
-                                  output_data=output_data.tolist(),
-                                  predicted_class=predicted_class,
-                                  predicted_label=predicted_label)
+    return render_template_string(
+        html,
+        temperature=sensor_values['temperature'],
+        ph=sensor_values['ph'],
+        humidity=sensor_values['humidity'],
+        soil_moisture=sensor_values['soil_moisture'],
+        sunlight_exposure=sensor_values['sunlight_exposure'],
+        output_data=output_data.tolist(),
+        predicted_class=predicted_class,
+        predicted_label=predicted_label
+    )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
