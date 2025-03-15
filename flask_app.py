@@ -22,7 +22,7 @@ label_encoder_path = "label_encoder.pkl"
 data_path = "Modified_Crop_Data_Cleaned.csv"  # This CSV must be included in your deployment
 
 # Define the features and target based on your dataset
-# Note: If your TFLite model was trained on only 5 features, remove "soil_type" from the list.
+# Note: We use 6 features: temperature, pH, humidity, soil_moisture, sunlight_exposure, and soil_type.
 features = ["temperature", "ph", "humidity", "soil_moisture", "sunlight_exposure", "soil_type"]
 target = "label"
 
@@ -83,8 +83,8 @@ FIREBASE_SENSOR_URL = "https://green-house-monitoring-2a06d-default-rtdb.firebas
 # Helper function: Get sensor values either from POST JSON or Firebase
 # -------------------------------------------------
 def get_sensor_values():
-    # Check if sensor values are provided in the request body (from MIT App Inventor)
     data = request.get_json()
+    # Check if sensor values are provided in the request body (from MIT App Inventor)
     if data and all(key in data for key in ["temperature", "pH", "humidity", "soilMoisture", "lux"]):
         try:
             temperature = float(data.get("temperature", 25.0))
@@ -92,11 +92,12 @@ def get_sensor_values():
             humidity = float(data.get("humidity", 50.0))
             soil_moisture = float(data.get("soilMoisture", 0))
             sunlight_exposure = float(data.get("lux", 100))
+            # Optionally, check if soil_type is provided
+            soil_type = float(data.get("soil_type", 0.0))
             logging.debug("Sensor data received from POST request.")
         except ValueError as e:
             raise Exception(f"Invalid sensor value in POST data: {e}")
     else:
-        # Fallback to Firebase sensor data if not provided in request
         logging.debug("No sensor data in POST request; fetching from Firebase.")
         try:
             response = requests.get(FIREBASE_SENSOR_URL)
@@ -113,6 +114,8 @@ def get_sensor_values():
             humidity = float(sensor_data.get("humidity", 50.0))
             soil_moisture = float(sensor_data.get("soilMoisture", 0))
             sunlight_exposure = float(sensor_data.get("lux", 100))
+            # Use default soil_type when not available from Firebase
+            soil_type = 0.0
         except ValueError as e:
             raise Exception(f"Invalid sensor value from Firebase: {e}")
     
@@ -121,22 +124,30 @@ def get_sensor_values():
         "ph": ph,
         "humidity": humidity,
         "soil_moisture": soil_moisture,
-        "sunlight_exposure": sunlight_exposure
+        "sunlight_exposure": sunlight_exposure,
+        "soil_type": soil_type  # May be default or provided by POST data
     }
 
 # -------------------------------------------------
 # Helper function: Run TFLite inference given sensor values
 # -------------------------------------------------
 def run_inference(sensor_values):
-    input_array = np.array([[
+    # If soil_type is missing in sensor_values, add a default value.
+    if "soil_type" not in sensor_values:
+        sensor_values["soil_type"] = 0.0
+
+    input_features = [
         sensor_values["temperature"],
         sensor_values["ph"],
         sensor_values["humidity"],
         sensor_values["soil_moisture"],
-        sensor_values["sunlight_exposure"]
-    ]], dtype=np.float32)
-    input_scaled = scaler.transform(input_array)
+        sensor_values["sunlight_exposure"],
+        sensor_values["soil_type"]
+    ]
+    input_array = np.array([input_features], dtype=np.float32)
+    logging.debug(f"Input array shape: {input_array.shape}")  # Should be (1, 6)
     try:
+        input_scaled = scaler.transform(input_array)
         interpreter.set_tensor(input_details[0]['index'], input_scaled)
         interpreter.invoke()
         output_data = interpreter.get_tensor(output_details[0]['index'])
@@ -203,6 +214,7 @@ def dashboard():
           <li>Humidity: {{ humidity }} %</li>
           <li>Soil Moisture: {{ soil_moisture }}</li>
           <li>Sunlight Exposure: {{ sunlight_exposure }} lux</li>
+          <li>Soil Type: {{ soil_type }}</li>
         </ul>
         <h2>TFLite Model Output</h2>
         <ul>
@@ -220,6 +232,7 @@ def dashboard():
         humidity=sensor_values['humidity'],
         soil_moisture=sensor_values['soil_moisture'],
         sunlight_exposure=sensor_values['sunlight_exposure'],
+        soil_type=sensor_values['soil_type'],
         output_data=output_data.tolist(),
         predicted_class=predicted_class,
         predicted_label=predicted_label
