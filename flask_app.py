@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.DEBUG)
 # -------------------------------------------------
 scaler_path = "scaler.pkl"
 label_encoder_path = "label_encoder.pkl"
-data_path = "Modified_Crop_Data_Cleaned.csv"  # This CSV must be included in your deployment
+data_path = "Modified_Crop_Data_Cleaned.csv"  # Ensure this CSV is in your deployment
 
 # Define the features and target based on your dataset.
 # We use 6 features: temperature, pH, humidity, soil_moisture, sunlight_exposure, and soil_type.
@@ -80,10 +80,10 @@ except Exception as e:
 FIREBASE_SENSOR_URL = "https://green-house-monitoring-2a06d-default-rtdb.firebaseio.com/Greenhouse/SensorData.json"
 
 # -------------------------------------------------
-# Helper function: Get sensor values either from POST JSON or Firebase fallback
+# Helper function: Get sensor values from POST JSON or Firebase fallback
 # -------------------------------------------------
 def get_sensor_values():
-    # Force JSON parsing even if Content-Type is not correctly set.
+    # Force JSON parsing even if the Content-Type header is not 'application/json'
     data = request.get_json(force=True, silent=True)
     if data and all(key in data for key in ["temperature", "pH", "humidity", "soilMoisture", "lux"]):
         try:
@@ -113,7 +113,7 @@ def get_sensor_values():
             humidity = float(sensor_data.get("humidity", 50.0))
             soil_moisture = float(sensor_data.get("soilMoisture", 0))
             sunlight_exposure = float(sensor_data.get("lux", 100))
-            soil_type = 0.0  # Default value if not provided by Firebase.
+            soil_type = 0.0  # default if not provided
         except ValueError as e:
             raise Exception(f"Invalid sensor value from Firebase: {e}")
     
@@ -159,8 +159,8 @@ def run_inference(sensor_values):
 def home():
     return "Crop Prediction API using Firebase data is running."
 
-# /predict now supports both GET and POST.
-@app.route("/predict", methods=["GET", "POST"])
+# POST endpoint for inference (recommended when sending sensor data)
+@app.route("/predict", methods=["POST"])
 def predict():
     try:
         sensor_values = get_sensor_values()
@@ -168,7 +168,7 @@ def predict():
     except Exception as e:
         logging.error(e)
         return jsonify({"error": str(e)}), 500
-
+    
     message = (
         f"Predicted crop: '{predicted_label}'. Conditions: Temperature = {sensor_values['temperature']}°C, "
         f"pH = {sensor_values['ph']}, Humidity = {sensor_values['humidity']}%, "
@@ -185,7 +185,7 @@ def predict():
     }
     return jsonify(response_json), 200
 
-# Dashboard endpoint remains GET-only.
+# Dashboard endpoint with improved UI using Bootstrap.
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     try:
@@ -195,29 +195,69 @@ def dashboard():
         logging.error(e)
         return f"Error: {e}", 500
 
+    message = (
+        f"Predicted crop: '{predicted_label}'. Conditions: Temperature = {sensor_values['temperature']}°C, "
+        f"pH = {sensor_values['ph']}, Humidity = {sensor_values['humidity']}%, "
+        f"Soil Moisture = {sensor_values['soil_moisture']}, "
+        f"Sunlight Exposure = {sensor_values['sunlight_exposure']} lux."
+    )
+    
     html = """
     <!doctype html>
-    <html>
+    <html lang="en">
       <head>
+        <meta charset="utf-8">
         <title>Greenhouse Monitoring Dashboard</title>
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+        <style>
+          body {
+            background-color: #f4f4f4;
+            padding-top: 20px;
+          }
+          .card {
+            margin-bottom: 20px;
+          }
+          pre {
+            background-color: #e9ecef;
+            padding: 10px;
+            border-radius: 4px;
+          }
+        </style>
       </head>
       <body>
-        <h1>Greenhouse Monitoring Dashboard</h1>
-        <h2>Sensor Data</h2>
-        <ul>
-          <li>Temperature: {{ temperature }} °C</li>
-          <li>pH: {{ ph }}</li>
-          <li>Humidity: {{ humidity }} %</li>
-          <li>Soil Moisture: {{ soil_moisture }}</li>
-          <li>Sunlight Exposure: {{ sunlight_exposure }} lux</li>
-          <li>Soil Type: {{ soil_type }}</li>
-        </ul>
-        <h2>TFLite Model Output</h2>
-        <ul>
-          <li>Raw Model Output: {{ output_data }}</li>
-          <li>Predicted Class: {{ predicted_class }}</li>
-          <li>Predicted Crop: {{ predicted_label }}</li>
-        </ul>
+        <div class="container">
+          <h1 class="text-center mb-4">Greenhouse Monitoring Dashboard</h1>
+          <div class="row">
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">Sensor Data</div>
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item">Temperature: {{ temperature }} °C</li>
+                  <li class="list-group-item">pH: {{ ph }}</li>
+                  <li class="list-group-item">Humidity: {{ humidity }} %</li>
+                  <li class="list-group-item">Soil Moisture: {{ soil_moisture }}</li>
+                  <li class="list-group-item">Sunlight Exposure: {{ sunlight_exposure }} lux</li>
+                  <li class="list-group-item">Soil Type: {{ soil_type }}</li>
+                </ul>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="card">
+                <div class="card-header">Model Output</div>
+                <ul class="list-group list-group-flush">
+                  <li class="list-group-item">Predicted Crop: <strong>{{ predicted_label }}</strong></li>
+                  <li class="list-group-item">Predicted Class: {{ predicted_class }}</li>
+                  <li class="list-group-item">Raw Output: <pre>{{ output_data }}</pre></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <div class="alert alert-info text-center" role="alert">
+            {{ message }}
+          </div>
+        </div>
+        <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
       </body>
     </html>
     """
@@ -231,7 +271,8 @@ def dashboard():
         soil_type=sensor_values['soil_type'],
         output_data=output_data.tolist(),
         predicted_class=predicted_class,
-        predicted_label=predicted_label
+        predicted_label=predicted_label,
+        message=message
     )
 
 if __name__ == "__main__":
