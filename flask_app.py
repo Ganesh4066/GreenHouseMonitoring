@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 import requests
 import tflite_runtime.interpreter as tflite
 import pickle
@@ -132,6 +132,75 @@ def predict():
         "message": message
     }
     return jsonify(response_json), 200
+
+@app.route("/dashboard", methods=["GET"])
+def dashboard():
+    """
+    Fetches sensor data, runs inference, and renders an HTML page displaying:
+    - Sensor values
+    - Raw model output and predicted crop
+    """
+    # Fetch sensor data from Firebase
+    response = requests.get(FIREBASE_SENSOR_URL)
+    if response.status_code != 200:
+        return "Error fetching sensor data from Firebase", 500
+    sensor_data = response.json()
+    if not sensor_data:
+        return "No sensor data found in Firebase", 400
+
+    try:
+        temperature = float(sensor_data.get("temperature", 25.0))
+        ph = float(sensor_data.get("pH", 7.0))
+        humidity = float(sensor_data.get("humidity", 50.0))
+        soil_moisture = float(sensor_data.get("soilMoisture", 0))
+        sunlight_exposure = float(sensor_data.get("lux", 100))
+    except ValueError as e:
+        return f"Invalid sensor value: {e}", 400
+
+    # Prepare input for TFLite model
+    input_array = np.array([[temperature, ph, humidity, soil_moisture, sunlight_exposure]], dtype=np.float32)
+    input_scaled = scaler.transform(input_array)
+    interpreter.set_tensor(input_details[0]['index'], input_scaled)
+    interpreter.invoke()
+    output_data = interpreter.get_tensor(output_details[0]['index'])
+    predicted_class = int(np.argmax(output_data[0]))
+    predicted_label = label_mapping.get(predicted_class, "Unknown")
+
+    # HTML template to display sensor data and model output
+    html = """
+    <!doctype html>
+    <html>
+      <head>
+        <title>Greenhouse Monitoring Dashboard</title>
+      </head>
+      <body>
+        <h1>Greenhouse Monitoring Dashboard</h1>
+        <h2>Sensor Data</h2>
+        <ul>
+          <li>Temperature: {{ temperature }} °C</li>
+          <li>pH: {{ ph }}</li>
+          <li>Humidity: {{ humidity }} %</li>
+          <li>Soil Moisture: {{ soil_moisture }}</li>
+          <li>Sunlight Exposure: {{ sunlight_exposure }} lux</li>
+        </ul>
+        <h2>TFLite Model Output</h2>
+        <ul>
+          <li>Raw Model Output: {{ output_data }}</li>
+          <li>Predicted Class: {{ predicted_class }}</li>
+          <li>Predicted Crop: {{ predicted_label }}</li>
+        </ul>
+      </body>
+    </html>
+    """
+    return render_template_string(html,
+                                  temperature=temperature,
+                                  ph=ph,
+                                  humidity=humidity,
+                                  soil_moisture=soil_moisture,
+                                  sunlight_exposure=sunlight_exposure,
+                                  output_data=output_data.tolist(),
+                                  predicted_class=predicted_class,
+                                  predicted_label=predicted_label)
 
 if __name__ == "__main__":
     # Use the port provided by the environment or default to 5000
