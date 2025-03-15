@@ -22,7 +22,7 @@ label_encoder_path = "label_encoder.pkl"
 data_path = "Modified_Crop_Data_Cleaned.csv"  # This CSV must be included in your deployment
 
 # Define the features and target based on your dataset
-# Note: We use 6 features: temperature, pH, humidity, soil_moisture, sunlight_exposure, and soil_type.
+# We use 6 features: temperature, pH, humidity, soil_moisture, sunlight_exposure, and soil_type.
 features = ["temperature", "ph", "humidity", "soil_moisture", "sunlight_exposure", "soil_type"]
 target = "label"
 
@@ -92,13 +92,12 @@ def get_sensor_values():
             humidity = float(data.get("humidity", 50.0))
             soil_moisture = float(data.get("soilMoisture", 0))
             sunlight_exposure = float(data.get("lux", 100))
-            # Optionally, check if soil_type is provided
             soil_type = float(data.get("soil_type", 0.0))
             logging.debug("Sensor data received from POST request.")
         except ValueError as e:
             raise Exception(f"Invalid sensor value in POST data: {e}")
     else:
-        logging.debug("No sensor data in POST request; fetching from Firebase.")
+        logging.debug("No sensor data in request; fetching from Firebase.")
         try:
             response = requests.get(FIREBASE_SENSOR_URL)
         except Exception as e:
@@ -114,8 +113,7 @@ def get_sensor_values():
             humidity = float(sensor_data.get("humidity", 50.0))
             soil_moisture = float(sensor_data.get("soilMoisture", 0))
             sunlight_exposure = float(sensor_data.get("lux", 100))
-            # Use default soil_type when not available from Firebase
-            soil_type = 0.0
+            soil_type = 0.0  # default value when not provided by Firebase
         except ValueError as e:
             raise Exception(f"Invalid sensor value from Firebase: {e}")
     
@@ -125,17 +123,13 @@ def get_sensor_values():
         "humidity": humidity,
         "soil_moisture": soil_moisture,
         "sunlight_exposure": sunlight_exposure,
-        "soil_type": soil_type  # May be default or provided by POST data
+        "soil_type": soil_type
     }
 
 # -------------------------------------------------
 # Helper function: Run TFLite inference given sensor values
 # -------------------------------------------------
 def run_inference(sensor_values):
-    # If soil_type is missing in sensor_values, add a default value.
-    if "soil_type" not in sensor_values:
-        sensor_values["soil_type"] = 0.0
-
     input_features = [
         sensor_values["temperature"],
         sensor_values["ph"],
@@ -165,7 +159,8 @@ def run_inference(sensor_values):
 def home():
     return "Crop Prediction API using Firebase data is running."
 
-@app.route("/predict", methods=["POST"])
+# Allow GET and POST for /predict for easier testing
+@app.route("/predict", methods=["GET", "POST"])
 def predict():
     try:
         sensor_values = get_sensor_values()
