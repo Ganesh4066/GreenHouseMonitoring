@@ -87,14 +87,14 @@ explanations = {
         "moderate humidity, and low soil moisture—closely match the conditions observed in the training "
         "data for mothbeans. Note: The pH value appears unusually high, so please verify sensor calibration."
     )
-    # Add more explanations for other crops here.
+    # Add more explanations for other crops as needed.
 }
 
 # -------------------------------------------------
 # Helper: Get sensor values (from request JSON or Firebase fallback)
 # -------------------------------------------------
 def get_sensor_values():
-    # Force JSON parsing even if Content-Type isn't set properly.
+    # Force JSON parsing even if the Content-Type header is not set correctly.
     data = request.get_json(force=True, silent=True)
     if data and all(key in data for key in ["temperature", "pH", "humidity", "soilMoisture", "lux"]):
         try:
@@ -170,6 +170,7 @@ def run_inference(sensor_values):
 def home():
     return "Crop Prediction API using Firebase data is running."
 
+# /predict endpoint supports both GET and POST requests.
 @app.route("/predict", methods=["GET", "POST"])
 def predict():
     try:
@@ -179,7 +180,6 @@ def predict():
         logging.error(e)
         return jsonify({"error": str(e)}), 500
 
-    # Get explanation if available
     explanation = explanations.get(predicted_label, "No detailed explanation available for this crop.")
 
     message = (
@@ -199,7 +199,7 @@ def predict():
     }
     return jsonify(response_json), 200
 
-# Dashboard endpoint with improved UI using Bootstrap.
+# /dashboard endpoint with improved UI using Bootstrap and auto-refresh every 30 seconds.
 @app.route("/dashboard", methods=["GET"])
 def dashboard():
     try:
@@ -230,6 +230,12 @@ def dashboard():
              .card { margin-bottom: 20px; }
              pre { background-color: #e9ecef; padding: 10px; border-radius: 4px; }
          </style>
+         <script>
+           // Auto-refresh every 30 seconds (30000 milliseconds)
+           setInterval(function() {
+             window.location.reload();
+           }, 30000);
+         </script>
       </head>
       <body>
          <div class="container">
